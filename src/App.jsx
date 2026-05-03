@@ -467,5 +467,3 @@ export default function App(){
 EOF
 echo "Done: $(wc -l < /mnt/user-data/outputs/src/App.jsx) lines"
 Output
-
-Done: 463 lines
