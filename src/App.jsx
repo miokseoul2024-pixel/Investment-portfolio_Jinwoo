@@ -1,799 +1,471 @@
+bash
+
+cat > /mnt/user-data/outputs/src/App.jsx << 'EOF'
 import { useState, useEffect, useMemo } from "react";
-import {
-  AreaChart, Area, ComposedChart, Bar,
-  XAxis, YAxis, Tooltip, ResponsiveContainer,
-  CartesianGrid, ReferenceLine
-} from "recharts";
+import { AreaChart, Area, ComposedChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, ReferenceLine } from "recharts";
 
-// ─────────────────────────────────────────────
-//  CONSTANTS
-// ─────────────────────────────────────────────
-const START_DATE     = new Date("2026-05-02");
-const INITIAL_GBP    = 5_000;
-
-const PORTFOLIOS = {
-  conservative: { label: "Conservative", annualReturn: 0.07, color: "#16a34a", desc: "Global ETFs (VWRL, ISF)", risk: "Low" },
-  balanced:     { label: "Balanced",     annualReturn: 0.11, color: "#2563eb", desc: "Stocks + ETFs mix",       risk: "Medium" },
-  aggressive:   { label: "Aggressive",   annualReturn: 0.18, color: "#f97316", desc: "Growth stocks & Tech",   risk: "High" },
+const START_DATE  = new Date("2026-05-02");
+const INITIAL_GBP = 5000;
+const PORTFOLIOS  = {
+  conservative: { label:"Conservative", r:0.07, color:"#16a34a" },
+  balanced:     { label:"Balanced",     r:0.11, color:"#2563eb" },
+  aggressive:   { label:"Aggressive",   r:0.18, color:"#f97316" },
 };
-
 const ASSETS = [
-  { ticker: "VWRL", name: "Vanguard All-World ETF",  allocation: 35, type: "ETF",   emoji: "🌍" },
-  { ticker: "AAPL", name: "Apple Inc.",               allocation: 20, type: "Stock", emoji: "🍎" },
-  { ticker: "NVDA", name: "NVIDIA Corp.",             allocation: 15, type: "Stock", emoji: "🟢" },
-  { ticker: "ISF",  name: "iShares FTSE 100 ETF",    allocation: 15, type: "ETF",   emoji: "🇬🇧" },
-  { ticker: "TSLA", name: "Tesla Inc.",               allocation: 10, type: "Stock", emoji: "⚡" },
-  { ticker: "CASH", name: "Cash Reserve",             allocation: 5,  type: "Cash",  emoji: "💷" },
+  {ticker:"VWRL",name:"Vanguard All-World ETF",alloc:35,type:"ETF",  emoji:"🌍"},
+  {ticker:"AAPL",name:"Apple Inc.",             alloc:20,type:"Stock",emoji:"🍎"},
+  {ticker:"NVDA",name:"NVIDIA Corp.",           alloc:15,type:"Stock",emoji:"🟢"},
+  {ticker:"ISF", name:"iShares FTSE 100 ETF",  alloc:15,type:"ETF",  emoji:"🇬🇧"},
+  {ticker:"TSLA",name:"Tesla Inc.",             alloc:10,type:"Stock",emoji:"⚡"},
+  {ticker:"CASH",name:"Cash Reserve",           alloc:5, type:"Cash", emoji:"💷"},
 ];
+const TABS=[{id:"tracker",icon:"📊",label:"Tracker"},{id:"simulate",icon:"🧮",label:"Simulator"},{id:"holdings",icon:"🗂",label:"Holdings"}];
 
-// ─────────────────────────────────────────────
-//  FORMATTERS
-// ─────────────────────────────────────────────
-const gbp = (v, dec = 0) =>
-  new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP", maximumFractionDigits: dec, minimumFractionDigits: dec }).format(v);
+const gbp  = v => new Intl.NumberFormat("en-GB",{style:"currency",currency:"GBP",maximumFractionDigits:0}).format(v);
+const gbp2 = v => new Intl.NumberFormat("en-GB",{style:"currency",currency:"GBP",minimumFractionDigits:2,maximumFractionDigits:2}).format(v);
+const gbpS = v => v>=1e6?`£${(v/1e6).toFixed(2)}M`:v>=1000?`£${(v/1000).toFixed(1)}k`:`£${Math.round(v)}`;
+const pct  = v => `${v>=0?"+":""}${v.toFixed(1)}%`;
 
-const gbpShort = (v) =>
-  v >= 1_000_000 ? `£${(v / 1_000_000).toFixed(2)}M`
-  : v >= 1_000   ? `£${(v / 1_000).toFixed(1)}k`
-  : `£${Math.round(v)}`;
-
-// ─────────────────────────────────────────────
-//  CALC HELPERS
-// ─────────────────────────────────────────────
-function calcCompound(initial, annualAdd, ratePct, years) {
-  const r = ratePct / 100;
-  const rows = [];
-  let withAdd = initial, withoutAdd = initial;
-  for (let y = 0; y <= years; y++) {
-    rows.push({
-      year: y === 0 ? "Start" : `Y${y}`, yearNum: y,
-      withAdd: Math.round(withAdd), withoutAdd: Math.round(withoutAdd),
-      principalWith: Math.round(initial + annualAdd * y),
-      gainWith: Math.round(withAdd - (initial + annualAdd * y)),
-      gainWithout: Math.round(withoutAdd - initial),
-    });
-    withAdd    = (withAdd + annualAdd) * (1 + r);
-    withoutAdd = withoutAdd * (1 + r);
-  }
-  return rows;
-}
-
-function calcMonthlyGrowth(mode, years) {
-  const r = PORTFOLIOS[mode].annualReturn / 12;
-  const months = years * 12;
-  return Array.from({ length: months + 1 }, (_, i) => {
-    const d = new Date(START_DATE);
-    d.setMonth(d.getMonth() + i);
-    return {
-      month: i,
-      value: parseFloat((INITIAL_GBP * Math.pow(1 + r, i)).toFixed(2)),
-      date: d.toLocaleDateString("en-GB", { month: "short", year: "2-digit" }),
-    };
+function calcGrowth(initial,annualAdd,ratePct,years){
+  const r=ratePct/100; let w=initial,wo=initial;
+  return Array.from({length:years+1},(_,y)=>{
+    const row={y,label:y===0?"Start":`Y${y}`,withAdd:Math.round(w),withoutAdd:Math.round(wo),
+      principal:Math.round(initial+annualAdd*y),gain:Math.round(w-(initial+annualAdd*y))};
+    w=(w+annualAdd)*(1+r); wo=wo*(1+r); return row;
   });
 }
 
-// ─────────────────────────────────────────────
-//  REUSABLE: SLIDER
-// ─────────────────────────────────────────────
-function Slider({ label, sublabel, value, min, max, step, onChange, fmt, accent = "#2563eb" }) {
-  const pct = ((value - min) / (max - min)) * 100;
-  return (
-    <div style={{ marginBottom: 22 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
-        <div>
-          <span style={{ fontSize: 11, color: "#64748b", fontFamily: "monospace", letterSpacing: "0.06em", textTransform: "uppercase" }}>{label}</span>
-          {sublabel && <span style={{ fontSize: 10, color: "#94a3b8", marginLeft: 6 }}>{sublabel}</span>}
-        </div>
-        <span style={{ fontSize: 15, fontWeight: 700, color: accent, fontFamily: "monospace", background: `${accent}14`, padding: "2px 10px", borderRadius: 7 }}>
-          {fmt(value)}
-        </span>
-      </div>
-      <div style={{ position: "relative", height: 6 }}>
-        <div style={{ position: "absolute", inset: 0, background: "#e2e8f0", borderRadius: 3 }} />
-        <div style={{ position: "absolute", top: 0, left: 0, height: "100%", width: `${pct}%`, background: accent, borderRadius: 3, transition: "width .08s" }} />
-        <input type="range" min={min} max={max} step={step} value={value}
-          onChange={e => onChange(Number(e.target.value))}
-          style={{ position: "absolute", inset: 0, opacity: 0, cursor: "pointer", width: "100%", height: "100%" }} />
-        <div style={{
-          position: "absolute", top: "50%", transform: "translateY(-50%)",
-          left: `calc(${pct}% - 9px)`,
-          width: 18, height: 18, borderRadius: "50%",
-          background: "#fff", border: `3px solid ${accent}`,
-          boxShadow: `0 0 0 3px ${accent}22`,
-          pointerEvents: "none", transition: "left .08s",
-        }} />
-      </div>
-    </div>
-  );
-}
+const LS="jinwoo_v3";
+const loadE=()=>{try{return JSON.parse(localStorage.getItem(LS)||"[]");}catch{return[];}};
+const saveE=a=>localStorage.setItem(LS,JSON.stringify(a));
 
-// ─────────────────────────────────────────────
-//  REUSABLE: STAT CARD
-// ─────────────────────────────────────────────
-function Card({ icon, label, value, sub, accent = "#2563eb", onClick }) {
-  return (
-    <div onClick={onClick} style={{
-      background: "#fff", border: "1px solid #e8edf3",
-      borderTop: `3px solid ${accent}`,
-      borderRadius: 14, padding: "16px 18px",
-      cursor: onClick ? "pointer" : "default",
-    }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 7 }}>
-        <span style={{ fontSize: 15 }}>{icon}</span>
-        <span style={{ fontSize: 10, color: "#94a3b8", fontFamily: "monospace", letterSpacing: "0.08em", textTransform: "uppercase" }}>{label}</span>
-      </div>
-      <div style={{ fontSize: 20, fontWeight: 800, color: "#0f172a", fontFamily: "monospace", lineHeight: 1 }}>{value}</div>
-      {sub && <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 5 }}>{sub}</div>}
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────
-//  TOOLTIPS
-// ─────────────────────────────────────────────
-const DashTooltip = ({ active, payload, label }) => {
-  if (!active || !payload?.length) return null;
-  const val = payload[0].value;
-  const gain = val - INITIAL_GBP;
-  return (
-    <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: "12px 16px", fontFamily: "monospace", boxShadow: "0 4px 20px rgba(0,0,0,.08)" }}>
-      <div style={{ color: "#94a3b8", fontSize: 10, marginBottom: 4 }}>{label}</div>
-      <div style={{ color: "#0f172a", fontSize: 17, fontWeight: 700 }}>{gbp(val)}</div>
-      <div style={{ color: gain >= 0 ? "#16a34a" : "#dc2626", fontSize: 12, marginTop: 2 }}>
-        {gain >= 0 ? "+" : ""}{gbp(gain)} ({((gain / INITIAL_GBP) * 100).toFixed(1)}%)
-      </div>
-    </div>
-  );
+const Tip=({active,payload,label})=>{
+  if(!active||!payload?.length)return null;
+  return(<div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:10,padding:"10px 14px",fontFamily:"monospace",fontSize:12,boxShadow:"0 4px 16px rgba(0,0,0,.08)"}}>
+    <div style={{color:"#64748b",marginBottom:6,fontWeight:600}}>{label}</div>
+    {payload.map((p,i)=>p.value!=null&&<div key={i} style={{color:p.color,marginBottom:2}}>{p.name}: <strong>{gbp(p.value)}</strong></div>)}
+  </div>);
 };
 
-const CalcTooltip = ({ active, payload, label }) => {
-  if (!active || !payload?.length) return null;
-  const d = payload[0]?.payload;
-  if (!d) return null;
-  return (
-    <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: "12px 16px", fontFamily: "monospace", boxShadow: "0 4px 20px rgba(0,0,0,.08)", minWidth: 190 }}>
-      <div style={{ color: "#0f172a", fontWeight: 700, fontSize: 12, marginBottom: 8 }}>
-        {label === "Start" ? "Start · 2 May 2026" : `Year ${d.yearNum}`}
+function SRow({label,sub,value,min,max,step,onChange,fmt,color="#2563eb"}){
+  const p=((value-min)/(max-min))*100;
+  return(<div style={{marginBottom:20}}>
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:8}}>
+      <div><span style={{fontSize:11,color:"#64748b",fontFamily:"monospace",letterSpacing:"0.06em",textTransform:"uppercase"}}>{label}</span>
+        {sub&&<span style={{fontSize:10,color:"#94a3b8",marginLeft:6}}>{sub}</span>}</div>
+      <span style={{fontSize:15,fontWeight:700,color,fontFamily:"monospace",background:`${color}14`,padding:"2px 10px",borderRadius:7}}>{fmt(value)}</span>
+    </div>
+    <div style={{position:"relative",height:6}}>
+      <div style={{position:"absolute",inset:0,background:"#e2e8f0",borderRadius:3}}/>
+      <div style={{position:"absolute",top:0,left:0,height:"100%",width:`${p}%`,background:color,borderRadius:3}}/>
+      <input type="range" min={min} max={max} step={step} value={value} onChange={e=>onChange(Number(e.target.value))}
+        style={{position:"absolute",inset:0,opacity:0,cursor:"pointer",width:"100%",height:"100%",margin:0}}/>
+      <div style={{position:"absolute",top:"50%",transform:"translateY(-50%)",left:`calc(${p}% - 9px)`,
+        width:18,height:18,borderRadius:"50%",background:"#fff",border:`3px solid ${color}`,
+        boxShadow:`0 0 0 3px ${color}22`,pointerEvents:"none"}}/>
+    </div>
+  </div>);
+}
+
+function TrackerView(){
+  const [entries,setE]=useState(loadE);
+  const [form,setF]=useState({date:new Date().toISOString().slice(0,10),value:"",note:""});
+  const [adding,setA]=useState(false);
+  const [mode,setM]=useState("balanced");
+  const port=PORTFOLIOS[mode];
+
+  const add=()=>{
+    if(!form.value)return;
+    const ne={id:Date.now(),date:form.date,value:parseFloat(form.value),note:form.note};
+    const u=[...entries,ne].sort((a,b)=>a.date.localeCompare(b.date));
+    setE(u);saveE(u);setF({date:new Date().toISOString().slice(0,10),value:"",note:""});setA(false);
+  };
+  const del=id=>{const u=entries.filter(e=>e.id!==id);setE(u);saveE(u);};
+
+  const days=Math.max(1,Math.ceil((new Date()-START_DATE)/86400000));
+  const proj=useMemo(()=>{
+    const r=port.r/365;
+    return Array.from({length:Math.min(days+1,1825)},(_,i)=>{
+      const d=new Date(START_DATE);d.setDate(d.getDate()+i);
+      return{date:d.toISOString().slice(0,10),projected:Math.round(INITIAL_GBP*Math.pow(1+r,i))};
+    });
+  },[port.r,days]);
+
+  const chart=useMemo(()=>{
+    const em={};entries.forEach(e=>{em[e.date]=e.value;});
+    return proj.map(d=>({...d,actual:em[d.date]??null,label:d.date.slice(5)}));
+  },[proj,entries]);
+
+  const latest=entries.length?entries[entries.length-1]:null;
+  const lv=latest?.value??INITIAL_GBP;
+  const ga=lv-INITIAL_GBP;
+  const gp=(ga/INITIAL_GBP)*100;
+  const din=latest?Math.max(1,Math.ceil((new Date(latest.date)-START_DATE)/86400000)):1;
+
+  return(<div style={{display:"flex",flexDirection:"column",gap:14}}>
+    <div style={{background:"#0f172a",borderRadius:16,padding:"18px 22px",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
+      <div>
+        <div style={{fontSize:10,color:"#475569",fontFamily:"monospace",letterSpacing:"0.08em",marginBottom:4}}>CURRENT PORTFOLIO VALUE</div>
+        <div style={{fontSize:30,fontWeight:800,color:"#fff",fontFamily:"monospace",lineHeight:1}}>{gbp2(lv)}</div>
+        <div style={{fontSize:12,color:ga>=0?"#4ade80":"#f87171",marginTop:5,fontFamily:"monospace"}}>
+          {ga>=0?"▲":"▼"} {gbp(Math.abs(ga))} ({pct(gp)}) from £{INITIAL_GBP.toLocaleString()}
+        </div>
       </div>
+      <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+        {Object.entries(PORTFOLIOS).map(([k,p])=>(
+          <button key={k} onClick={()=>setM(k)} style={{padding:"6px 12px",borderRadius:8,
+            border:`1px solid ${mode===k?p.color:"#1e293b"}`,background:mode===k?`${p.color}22`:"#1e293b",
+            color:mode===k?p.color:"#475569",fontFamily:"monospace",fontSize:11,fontWeight:700,cursor:"pointer"}}>
+            {p.label}
+          </button>
+        ))}
+      </div>
+    </div>
+
+    <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10}}>
       {[
-        { l: "With top-ups",    v: gbp(d.withAdd),    c: "#2563eb" },
-        { l: "Without top-ups", v: gbp(d.withoutAdd), c: "#94a3b8" },
-        { l: "Gain (with)",     v: gbp(d.gainWith),   c: "#16a34a" },
-      ].map(r => (
-        <div key={r.l} style={{ display: "flex", justifyContent: "space-between", gap: 16, fontSize: 11, marginBottom: 3 }}>
-          <span style={{ color: "#64748b" }}>{r.l}</span>
-          <span style={{ color: r.c, fontWeight: 700 }}>{r.v}</span>
+        {icon:"💷",l:"Invested",   v:gbp(INITIAL_GBP),  sub:"2 May 2026",    c:"#0f172a"},
+        {icon:"📅",l:"Day",        v:`Day ${din}`,       sub:"Keep going! 💪", c:"#2563eb"},
+        {icon:"📈",l:"Return",     v:pct(gp),            sub:ga>=0?`+${gbp(ga)}`:gbp(ga), c:ga>=0?"#16a34a":"#dc2626"},
+      ].map(s=>(
+        <div key={s.l} style={{background:"#fff",border:"1px solid #e2e8f0",borderTop:`3px solid ${s.c}`,borderRadius:12,padding:"14px 16px"}}>
+          <div style={{fontSize:10,color:"#94a3b8",fontFamily:"monospace",letterSpacing:"0.08em",marginBottom:5}}>{s.icon} {s.l.toUpperCase()}</div>
+          <div style={{fontSize:20,fontWeight:800,color:s.c,fontFamily:"monospace"}}>{s.v}</div>
+          <div style={{fontSize:11,color:"#94a3b8",marginTop:3}}>{s.sub}</div>
         </div>
       ))}
     </div>
-  );
-};
 
-// ─────────────────────────────────────────────
-//  NAV ITEM
-// ─────────────────────────────────────────────
-function NavItem({ icon, label, active, onClick }) {
-  return (
-    <button onClick={onClick} style={{
-      display: "flex", alignItems: "center", gap: 10,
-      padding: "10px 14px", borderRadius: 10, border: "none",
-      background: active ? "#eff6ff" : "transparent",
-      color: active ? "#2563eb" : "#64748b",
-      fontFamily: "'DM Sans', sans-serif", fontSize: 13, fontWeight: active ? 700 : 500,
-      cursor: "pointer", width: "100%", textAlign: "left",
-      transition: "all 0.15s",
-    }}>
-      <span style={{ fontSize: 16 }}>{icon}</span>
-      {label}
-      {active && <div style={{ marginLeft: "auto", width: 5, height: 5, borderRadius: "50%", background: "#2563eb" }} />}
-    </button>
-  );
-}
-
-// ─────────────────────────────────────────────
-//  DASHBOARD SECTION
-// ─────────────────────────────────────────────
-function DashboardView({ liveValue }) {
-  const [mode, setMode]           = useState("balanced");
-  const [horizon, setHorizon]     = useState(5);
-  const [monthlyAdd, setMonthlyAdd] = useState(100);
-  const [dashTab, setDashTab]     = useState("growth");
-  const [animKey, setAnimKey]     = useState(0);
-
-  const port = PORTFOLIOS[mode];
-  const growthData = useMemo(() => calcMonthlyGrowth(mode, horizon), [mode, horizon]);
-  const finalValue = growthData[growthData.length - 1].value;
-  const totalGain  = finalValue - INITIAL_GBP;
-  const gainPct    = ((totalGain / INITIAL_GBP) * 100).toFixed(1);
-
-  // with monthly deposits
-  const totalWithDeposits = useMemo(() => {
-    const r = port.annualReturn / 12, months = horizon * 12;
-    let v = INITIAL_GBP;
-    for (let i = 0; i < months; i++) v = v * (1 + r) + monthlyAdd;
-    return v;
-  }, [port, horizon, monthlyAdd]);
-  const totalDeposited = INITIAL_GBP + monthlyAdd * horizon * 12;
-  const pureGrowth     = totalWithDeposits - totalDeposited;
-
-  const today = new Date();
-  const daysIn = Math.max(0, Math.floor((today - START_DATE) / 86_400_000));
-
-  useEffect(() => setAnimKey(k => k + 1), [mode, horizon]);
-
-  const tabBtn = (t, label) => (
-    <button onClick={() => setDashTab(t)} style={{
-      padding: "7px 18px", borderRadius: 999, border: "none", cursor: "pointer",
-      fontFamily: "monospace", fontSize: 12, fontWeight: 600,
-      background: dashTab === t ? "#0f172a" : "transparent",
-      color: dashTab === t ? "#fff" : "#94a3b8",
-      transition: "all 0.18s",
-    }}>{label}</button>
-  );
-
-  return (
-    <div>
-      {/* Live header bar */}
-      <div style={{
-        background: "#0f172a", borderRadius: 16, padding: "20px 24px",
-        display: "flex", justifyContent: "space-between", alignItems: "center",
-        marginBottom: 20,
-      }}>
+    <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:16,padding:"18px 20px 12px"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
         <div>
-          <div style={{ fontSize: 11, color: "#475569", fontFamily: "monospace", letterSpacing: "0.08em", marginBottom: 4 }}>
-            TRADING 212 · ISA · GBP · STARTED {START_DATE.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }).toUpperCase()}
-          </div>
-          <div style={{ fontSize: 28, fontWeight: 800, color: "#fff", fontFamily: "monospace" }}>
-            {gbp(liveValue, 2)}
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 5 }}>
-            <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#4ade80", animation: "pulse 2s infinite" }} />
-            <span style={{ fontSize: 11, color: "#4ade80", fontFamily: "monospace" }}>LIVE · Day {daysIn === 0 ? 1 : daysIn}</span>
+          <div style={{fontWeight:700,color:"#0f172a",fontSize:14}}>Projected vs Actual</div>
+          <div style={{fontSize:11,color:"#94a3b8",fontFamily:"monospace",marginTop:2}}>
+            {port.label} ({(port.r*100).toFixed(0)}% p.a.) projection vs your logged values
           </div>
         </div>
-        <div style={{ textAlign: "right" }}>
-          <div style={{ fontSize: 10, color: "#475569", fontFamily: "monospace", marginBottom: 4 }}>STRATEGY</div>
-          <div style={{ display: "flex", gap: 6 }}>
-            {Object.entries(PORTFOLIOS).map(([key, p]) => (
-              <button key={key} onClick={() => setMode(key)} style={{
-                padding: "6px 12px", borderRadius: 8, border: `1px solid ${mode === key ? p.color : "#1e293b"}`,
-                background: mode === key ? `${p.color}22` : "#1e293b",
-                color: mode === key ? p.color : "#475569",
-                fontFamily: "monospace", fontSize: 11, fontWeight: 700, cursor: "pointer",
-                transition: "all 0.18s",
-              }}>{p.label}</button>
-            ))}
-          </div>
-        </div>
+        <button onClick={()=>setA(true)} style={{padding:"8px 16px",borderRadius:10,border:"none",
+          background:"#2563eb",color:"#fff",fontFamily:"monospace",fontSize:12,fontWeight:700,cursor:"pointer"}}>
+          + Log Value
+        </button>
       </div>
-
-      {/* Stat cards */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12, marginBottom: 20 }}>
-        <Card icon="💷" label="Invested"          value={gbp(INITIAL_GBP)}  sub="Initial capital"                   accent="#0f172a" />
-        <Card icon="📈" label={`${horizon}Y Proj.`} value={gbpShort(finalValue)} sub={`+${gainPct}% growth`}       accent={port.color} />
-        <Card icon="✨" label="Projected Gain"    value={gbpShort(totalGain)} sub={`${port.label} strategy`}       accent="#16a34a" />
-        <Card icon="📅" label="Ann. Return"       value={`${(port.annualReturn * 100).toFixed(0)}%`} sub={`${port.risk} risk`} accent="#f59e0b" />
-      </div>
-
-      {/* Tab bar */}
-      <div style={{ display: "flex", gap: 4, marginBottom: 16, background: "#f1f5f9", borderRadius: 12, padding: 4, width: "fit-content" }}>
-        {tabBtn("growth",    "📊 Growth")}
-        {tabBtn("compound",  "🔁 Compound")}
-        {tabBtn("portfolio", "🗂 Holdings")}
-      </div>
-
-      {/* Growth tab */}
-      {dashTab === "growth" && (
-        <div key={animKey} style={{ background: "#fff", border: "1px solid #e8edf3", borderRadius: 16, padding: 24 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 20 }}>
-            <div>
-              <div style={{ fontSize: 10, color: "#94a3b8", fontFamily: "monospace", letterSpacing: "0.1em", marginBottom: 4 }}>COMPOUND GROWTH PROJECTION</div>
-              <div style={{ fontSize: 26, fontWeight: 800, color: port.color, fontFamily: "monospace" }}>
-                {gbpShort(finalValue)} <span style={{ fontSize: 14, color: "#16a34a" }}>+{gainPct}%</span>
-              </div>
-            </div>
-            <div style={{ display: "flex", gap: 6 }}>
-              {[3, 5, 10].map(y => (
-                <button key={y} onClick={() => setHorizon(y)} style={{
-                  padding: "5px 12px", borderRadius: 8, cursor: "pointer",
-                  border: `1px solid ${horizon === y ? port.color : "#e8edf3"}`,
-                  background: horizon === y ? `${port.color}15` : "#f8fafc",
-                  color: horizon === y ? port.color : "#94a3b8",
-                  fontFamily: "monospace", fontSize: 12,
-                }}>{y}Y</button>
-              ))}
-            </div>
-          </div>
-          <ResponsiveContainer width="100%" height={240}>
-            <AreaChart data={growthData} margin={{ top: 5, right: 0, left: 0, bottom: 0 }}>
-              <defs>
-                <linearGradient id="dg" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%"  stopColor={port.color} stopOpacity={0.2} />
-                  <stop offset="95%" stopColor={port.color} stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid stroke="#f1f5f9" strokeDasharray="4 4" vertical={false} />
-              <XAxis dataKey="date" tick={{ fill: "#cbd5e1", fontSize: 10, fontFamily: "monospace" }} tickLine={false} axisLine={false} interval={Math.floor(growthData.length / 5)} />
-              <YAxis tick={{ fill: "#cbd5e1", fontSize: 10, fontFamily: "monospace" }} tickLine={false} axisLine={false} tickFormatter={gbpShort} width={50} />
-              <Tooltip content={<DashTooltip />} />
-              <ReferenceLine y={INITIAL_GBP} stroke="#e2e8f0" strokeDasharray="5 5" />
-              <Area type="monotone" dataKey="value" stroke={port.color} strokeWidth={2.5} fill="url(#dg)" dot={false} activeDot={{ r: 5, fill: port.color }} />
-            </AreaChart>
-          </ResponsiveContainer>
-          <div style={{ marginTop: 14, padding: "10px 14px", background: "#f8fafc", borderRadius: 10, display: "flex", gap: 24 }}>
-            {[
-              { l: "Start", v: "2 May 2026" },
-              { l: "Target year", v: new Date(START_DATE.getTime() + horizon * 365.25 * 86_400_000).getFullYear() },
-              { l: "Return", v: `${(port.annualReturn * 100).toFixed(0)}% p.a.` },
-            ].map(i => (
-              <div key={i.l} style={{ fontSize: 12, color: "#94a3b8" }}>
-                {i.l}: <span style={{ color: "#0f172a", fontWeight: 600 }}>{i.v}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Compound tab */}
-      {dashTab === "compound" && (
-        <div style={{ background: "#fff", border: "1px solid #e8edf3", borderRadius: 16, padding: 24 }}>
-          <div style={{ fontSize: 10, color: "#94a3b8", fontFamily: "monospace", letterSpacing: "0.1em", marginBottom: 18 }}>COMPOUND WITH MONTHLY TOP-UPS</div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, marginBottom: 24 }}>
-            <div>
-              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 8 }}>Monthly top-up</div>
-              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                <input type="range" min={0} max={500} step={10} value={monthlyAdd}
-                  onChange={e => setMonthlyAdd(Number(e.target.value))}
-                  style={{ flex: 1, accentColor: "#2563eb" }} />
-                <span style={{ fontFamily: "monospace", color: "#2563eb", fontSize: 16, fontWeight: 700, minWidth: 60 }}>£{monthlyAdd}</span>
-              </div>
-            </div>
-            <div>
-              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 8 }}>Time horizon</div>
-              <div style={{ display: "flex", gap: 6 }}>
-                {[3, 5, 7, 10].map(y => (
-                  <button key={y} onClick={() => setHorizon(y)} style={{
-                    flex: 1, padding: "7px 0", borderRadius: 8, cursor: "pointer",
-                    border: `1px solid ${horizon === y ? "#2563eb" : "#e8edf3"}`,
-                    background: horizon === y ? "#eff6ff" : "#f8fafc",
-                    color: horizon === y ? "#2563eb" : "#94a3b8",
-                    fontFamily: "monospace", fontSize: 12,
-                  }}>{y}Y</button>
-                ))}
-              </div>
-            </div>
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12, marginBottom: 20 }}>
-            {[
-              { l: "Total deposited",   v: gbp(totalDeposited),     c: "#0f172a" },
-              { l: "Investment growth", v: gbp(Math.round(pureGrowth)), c: "#16a34a" },
-              { l: "Final value",       v: gbp(Math.round(totalWithDeposits)), c: "#2563eb" },
-            ].map(it => (
-              <div key={it.l} style={{ background: "#f8fafc", border: "1px solid #e8edf3", borderRadius: 12, padding: "14px 16px" }}>
-                <div style={{ fontSize: 10, color: "#94a3b8", fontFamily: "monospace", letterSpacing: "0.08em", marginBottom: 5 }}>{it.l.toUpperCase()}</div>
-                <div style={{ fontSize: 19, fontWeight: 800, color: it.c, fontFamily: "monospace" }}>{it.v}</div>
-              </div>
-            ))}
-          </div>
-          <div style={{ marginBottom: 6, display: "flex", justifyContent: "space-between", fontSize: 11, color: "#94a3b8" }}>
-            <span>Capital deposited</span><span>Compounded growth</span>
-          </div>
-          <div style={{ height: 10, borderRadius: 5, overflow: "hidden", display: "flex", background: "#f1f5f9" }}>
-            <div style={{ width: `${(totalDeposited / totalWithDeposits) * 100}%`, background: "#bfdbfe", transition: "width .4s" }} />
-            <div style={{ flex: 1, background: "#2563eb", transition: "flex .4s" }} />
-          </div>
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginTop: 5 }}>
-            <span style={{ color: "#2563eb" }}>{((totalDeposited / totalWithDeposits) * 100).toFixed(0)}%</span>
-            <span style={{ color: "#16a34a" }}>{((pureGrowth / totalWithDeposits) * 100).toFixed(0)}%</span>
-          </div>
-          <div style={{ marginTop: 16, padding: "12px 14px", background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 10, fontSize: 12, color: "#1d4ed8" }}>
-            💡 Trading 212 ISA — up to £20,000/year tax-free. Zero capital gains tax on profits.
-          </div>
-        </div>
-      )}
-
-      {/* Holdings tab */}
-      {dashTab === "portfolio" && (
-        <div style={{ background: "#fff", border: "1px solid #e8edf3", borderRadius: 16, padding: 24 }}>
-          <div style={{ fontSize: 10, color: "#94a3b8", fontFamily: "monospace", letterSpacing: "0.1em", marginBottom: 18 }}>SUGGESTED ALLOCATION · £{INITIAL_GBP.toLocaleString()}</div>
-          {ASSETS.map((a, i) => {
-            const val = (a.allocation / 100) * INITIAL_GBP;
-            return (
-              <div key={i} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 0", borderBottom: i < ASSETS.length - 1 ? "1px solid #f1f5f9" : "none" }}>
-                <div style={{ width: 36, height: 36, borderRadius: 9, background: "#f1f5f9", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 17, flexShrink: 0 }}>
-                  {a.emoji}
-                </div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
-                    <div>
-                      <span style={{ fontFamily: "monospace", fontWeight: 700, fontSize: 13, color: "#0f172a" }}>{a.ticker}</span>
-                      <span style={{ color: "#94a3b8", fontSize: 11, marginLeft: 8 }}>{a.name}</span>
-                    </div>
-                    <div>
-                      <span style={{ fontFamily: "monospace", fontSize: 13, color: "#0f172a" }}>{gbp(val)}</span>
-                      <span style={{
-                        marginLeft: 8, fontSize: 10, padding: "2px 7px", borderRadius: 999,
-                        background: a.type === "ETF" ? "#eff6ff" : a.type === "Stock" ? "#fff7ed" : "#f1f5f9",
-                        color: a.type === "ETF" ? "#2563eb" : a.type === "Stock" ? "#f97316" : "#94a3b8",
-                        fontFamily: "monospace",
-                      }}>{a.type}</span>
-                    </div>
-                  </div>
-                  <div style={{ height: 4, background: "#f1f5f9", borderRadius: 2, overflow: "hidden" }}>
-                    <div style={{
-                      height: "100%", width: `${a.allocation}%`,
-                      background: a.type === "ETF" ? "linear-gradient(90deg,#60a5fa,#818cf8)" : a.type === "Stock" ? "linear-gradient(90deg,#f97316,#fb923c)" : "#d1d5db",
-                      borderRadius: 2,
-                    }} />
-                  </div>
-                </div>
-                <div style={{ fontFamily: "monospace", fontSize: 13, fontWeight: 700, color: "#cbd5e1", minWidth: 34, textAlign: "right" }}>{a.allocation}%</div>
-              </div>
-            );
-          })}
-          <div style={{ marginTop: 18, padding: "12px 14px", background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 10 }}>
-            <div style={{ fontSize: 11, color: "#15803d", fontWeight: 600, marginBottom: 3 }}>🎓 Student tip</div>
-            <div style={{ fontSize: 12, color: "#166534", lineHeight: 1.6 }}>
-              Start with VWRL for instant global diversification, then layer individual stocks as you build conviction. T212 charges zero commission.
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Milestones */}
-      <div style={{ marginTop: 16, background: "#fff", border: "1px solid #e8edf3", borderRadius: 16, padding: "18px 24px" }}>
-        <div style={{ fontSize: 10, color: "#94a3b8", fontFamily: "monospace", letterSpacing: "0.1em", marginBottom: 14 }}>MILESTONES</div>
-        <div style={{ display: "flex", gap: 10, overflowX: "auto", paddingBottom: 4 }}>
-          {[
-            { label: "Break Even", target: INITIAL_GBP, emoji: "🎯" },
-            { label: "£6K",  target: 6_000,  emoji: "🌱" },
-            { label: "£7.5K", target: 7_500, emoji: "🚀" },
-            { label: "£10K", target: 10_000, emoji: "💎" },
-            { label: "£15K", target: 15_000, emoji: "🏆" },
-          ].map((m, i) => {
-            const r = port.annualReturn / 12;
-            let mo = 0, v = INITIAL_GBP;
-            while (v < m.target && mo < 600) { v *= (1 + r); mo++; }
-            const reached = mo < 600;
-            return (
-              <div key={i} style={{ flexShrink: 0, background: "#f8fafc", border: "1px solid #e8edf3", borderRadius: 12, padding: "12px 16px", textAlign: "center", minWidth: 95 }}>
-                <div style={{ fontSize: 20, marginBottom: 5 }}>{m.emoji}</div>
-                <div style={{ fontFamily: "monospace", fontSize: 12, fontWeight: 700, color: "#0f172a" }}>{m.label}</div>
-                <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 3 }}>{reached ? `~${(mo / 12).toFixed(1)}y` : "—"}</div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
+      <ResponsiveContainer width="100%" height={200}>
+        <ComposedChart data={chart} margin={{top:5,right:5,left:0,bottom:0}}>
+          <CartesianGrid stroke="#f1f5f9" strokeDasharray="4 4" vertical={false}/>
+          <XAxis dataKey="label" tick={{fill:"#cbd5e1",fontSize:9,fontFamily:"monospace"}} tickLine={false} axisLine={false} interval={Math.floor(chart.length/5)}/>
+          <YAxis tick={{fill:"#cbd5e1",fontSize:9,fontFamily:"monospace"}} tickLine={false} axisLine={false} tickFormatter={gbpS} width={46}/>
+          <Tooltip content={<Tip/>}/>
+          <Area type="monotone" dataKey="projected" stroke={port.color} strokeWidth={2} fill={`${port.color}15`} dot={false} name="Projected"/>
+          <Line type="monotone" dataKey="actual" stroke="#f97316" strokeWidth={2.5} dot={{fill:"#f97316",r:5}} connectNulls={false} name="Actual"/>
+        </ComposedChart>
+      </ResponsiveContainer>
     </div>
-  );
+
+    {adding&&(
+      <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:999,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+        <div style={{background:"#fff",borderRadius:20,padding:"28px",width:"100%",maxWidth:360,boxShadow:"0 20px 60px rgba(0,0,0,.25)"}}>
+          <div style={{fontSize:16,fontWeight:800,color:"#0f172a",marginBottom:20}}>📝 Log Portfolio Value</div>
+          {[{l:"Date",k:"date",t:"date",ph:""},{l:"Value (£)",k:"value",t:"number",ph:"e.g. 5050"},{l:"Note",k:"note",t:"text",ph:"e.g. After NVDA surge"}].map(f=>(
+            <div key={f.k} style={{marginBottom:14}}>
+              <div style={{fontSize:11,color:"#64748b",fontFamily:"monospace",marginBottom:5,letterSpacing:"0.06em",textTransform:"uppercase"}}>{f.l}</div>
+              <input type={f.t} value={form[f.k]} placeholder={f.ph} onChange={e=>setF(p=>({...p,[f.k]:e.target.value}))}
+                style={{width:"100%",padding:"10px 12px",borderRadius:10,border:"1px solid #e2e8f0",fontFamily:"monospace",fontSize:14,outline:"none",boxSizing:"border-box"}}/>
+            </div>
+          ))}
+          <div style={{display:"flex",gap:8,marginTop:6}}>
+            <button onClick={()=>setA(false)} style={{flex:1,padding:"10px",borderRadius:10,border:"1px solid #e2e8f0",background:"#f8fafc",color:"#64748b",fontFamily:"monospace",fontSize:13,cursor:"pointer"}}>Cancel</button>
+            <button onClick={add} style={{flex:2,padding:"10px",borderRadius:10,border:"none",background:"#2563eb",color:"#fff",fontFamily:"monospace",fontSize:13,fontWeight:700,cursor:"pointer"}}>Save Entry</button>
+          </div>
+        </div>
+      </div>
+    )}
+
+    <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:16,padding:"18px 20px"}}>
+      <div style={{fontWeight:700,color:"#0f172a",fontSize:14,marginBottom:14}}>Entry Log</div>
+      {entries.length===0?(
+        <div style={{textAlign:"center",padding:"24px 0",color:"#94a3b8",fontSize:13}}>No entries yet — click "+ Log Value" to start tracking!</div>
+      ):(
+        <div>{[...entries].reverse().map((e,i)=>{
+          const idx=entries.indexOf(e);
+          const prev=entries[idx-1];
+          const diff=prev?e.value-prev.value:e.value-INITIAL_GBP;
+          return(<div key={e.id} style={{display:"flex",alignItems:"center",gap:12,padding:"11px 0",borderBottom:i<entries.length-1?"1px solid #f1f5f9":"none"}}>
+            <div style={{width:8,height:8,borderRadius:"50%",background:diff>=0?"#16a34a":"#dc2626",flexShrink:0}}/>
+            <div style={{flex:1}}>
+              <div style={{fontFamily:"monospace",fontSize:13,fontWeight:700,color:"#0f172a"}}>
+                {gbp2(e.value)}<span style={{fontSize:11,color:diff>=0?"#16a34a":"#dc2626",marginLeft:8}}>{diff>=0?"+":""}{gbp(diff)}</span>
+              </div>
+              <div style={{fontSize:11,color:"#94a3b8",marginTop:2}}>
+                {new Date(e.date).toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"})}
+                {e.note&&<span style={{marginLeft:8,color:"#64748b"}}>· {e.note}</span>}
+              </div>
+            </div>
+            <button onClick={()=>del(e.id)} style={{padding:"4px 8px",borderRadius:6,border:"1px solid #fee2e2",background:"#fff",color:"#dc2626",fontSize:11,cursor:"pointer"}}>✕</button>
+          </div>);
+        })}</div>
+      )}
+    </div>
+  </div>);
 }
 
-// ─────────────────────────────────────────────
-//  CALCULATOR SECTION
-// ─────────────────────────────────────────────
-function CalculatorView() {
-  const [initial,   setInitial]   = useState(5_000);
-  const [annualAdd, setAnnualAdd] = useState(1_200);
-  const [rate,      setRate]      = useState(11);
-  const [years,     setYears]     = useState(10);
-  const [chartMode, setChartMode] = useState("growth");
-
-  const data = useMemo(() => calcCompound(initial, annualAdd, rate, years), [initial, annualAdd, rate, years]);
-  const last = data[data.length - 1];
-  const totalInvested = initial + annualAdd * years;
-  const gainWith      = last.withAdd - totalInvested;
-  const gainWithout   = last.withoutAdd - initial;
-  const extraTopups   = last.withAdd - last.withoutAdd;
-  const multiplier    = (last.withAdd / initial).toFixed(2);
-
-  const presets = [
-    { label: "🎓 Now (student)",    i: 5_000, a: 1_200, r: 11, y: 5,  desc: "£5k · £100/mo · 11% · 5yr" },
-    { label: "💼 Working (3yr+)",  i: 5_000, a: 6_000, r: 11, y: 10, desc: "£5k · £500/mo · 11% · 10yr" },
-    { label: "🚀 Aggressive",      i: 5_000, a: 2_400, r: 18, y: 10, desc: "£5k · £200/mo · 18% · 10yr" },
-    { label: "🛡 Conservative",   i: 5_000, a: 1_200, r: 7,  y: 10, desc: "£5k · £100/mo · 7% · 10yr" },
+function SimulatorView(){
+  const [initial,setI]=useState(5000);
+  const [annualAdd,setA]=useState(1200);
+  const [rate,setR]=useState(11);
+  const [years,setY]=useState(10);
+  const [cm,setCm]=useState("growth");
+  const data=useMemo(()=>calcGrowth(initial,annualAdd,rate,years),[initial,annualAdd,rate,years]);
+  const last=data[data.length-1];
+  const totalIn=initial+annualAdd*years;
+  const gainWith=last.withAdd-totalIn;
+  const extra=last.withAdd-last.withoutAdd;
+  const presets=[
+    {label:"🎓 Student now",   i:5000,a:1200,r:11,y:5},
+    {label:"💼 Working (3yr+)",i:5000,a:6000,r:11,y:10},
+    {label:"🚀 Aggressive",    i:5000,a:2400,r:18,y:10},
+    {label:"🛡 Conservative",  i:5000,a:1200,r:7, y:10},
   ];
-
-  const tabBtn = (k, label) => (
-    <button onClick={() => setChartMode(k)} style={{
-      padding: "7px 16px", borderRadius: 8, border: "none", cursor: "pointer",
-      fontFamily: "monospace", fontSize: 12, fontWeight: 600,
-      background: chartMode === k ? "#0f172a" : "transparent",
-      color: chartMode === k ? "#fff" : "#94a3b8",
-      transition: "all 0.18s",
-    }}>{label}</button>
-  );
-
-  return (
-    <div>
-      {/* Stat row */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12, marginBottom: 20 }}>
-        <Card icon="💷" label="Final (with top-ups)" value={gbpShort(last.withAdd)}   sub={`×${multiplier} your money`}                              accent="#2563eb" />
-        <Card icon="📈" label="Total gain"           value={gbpShort(gainWith)}        sub={`+${((gainWith/totalInvested)*100).toFixed(1)}% on invested`} accent="#16a34a" />
-        <Card icon="➕" label="Bonus from top-ups"   value={gbpShort(extraTopups)}     sub="vs no extra deposits"                                     accent="#f59e0b" />
-        <Card icon="🏦" label="Without top-ups"      value={gbpShort(last.withoutAdd)} sub={`+${((gainWithout/initial)*100).toFixed(1)}% on £${initial.toLocaleString()}`} accent="#94a3b8" />
+  return(<div style={{display:"flex",flexDirection:"column",gap:14}}>
+    <div style={{background:"#0f172a",borderRadius:16,padding:"18px 22px",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
+      <div>
+        <div style={{fontSize:10,color:"#475569",fontFamily:"monospace",letterSpacing:"0.08em",marginBottom:4}}>PROJECTED FINAL VALUE</div>
+        <div style={{fontSize:28,fontWeight:800,color:"#fff",fontFamily:"monospace"}}>{gbpS(last.withAdd)}</div>
+        <div style={{fontSize:12,color:"#4ade80",marginTop:4,fontFamily:"monospace"}}>+{gbpS(gainWith)} gain · ×{(last.withAdd/initial).toFixed(2)} your money</div>
       </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "300px 1fr", gap: 20 }}>
-
-        {/* Controls */}
-        <div style={{ background: "#fff", border: "1px solid #e8edf3", borderRadius: 16, padding: "24px 20px" }}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", marginBottom: 20, paddingBottom: 12, borderBottom: "1px solid #f1f5f9" }}>
-            Adjust Parameters
-          </div>
-          <Slider label="Initial Investment" sublabel="Your current: £5,000"
-            value={initial} min={500} max={50_000} step={500}
-            onChange={setInitial} fmt={v => `£${v.toLocaleString()}`} accent="#2563eb" />
-          <Slider label="Annual Top-up" sublabel="£100/mo = £1,200/yr"
-            value={annualAdd} min={0} max={12_000} step={100}
-            onChange={setAnnualAdd} fmt={v => v === 0 ? "£0" : `£${v.toLocaleString()}/yr`} accent="#f59e0b" />
-          <Slider label="Annual Return" sublabel="Balanced ~11%"
-            value={rate} min={1} max={30} step={0.5}
-            onChange={setRate} fmt={v => `${v}%`} accent="#16a34a" />
-          <Slider label="Time Horizon"
-            value={years} min={1} max={40} step={1}
-            onChange={setYears} fmt={v => `${v}yr${v > 1 ? "s" : ""}`} accent="#7c3aed" />
-
-          {/* Presets */}
-          <div style={{ marginTop: 4 }}>
-            <div style={{ fontSize: 10, color: "#94a3b8", fontFamily: "monospace", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 10 }}>Quick Presets</div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-              {presets.map(p => (
-                <button key={p.label} onClick={() => { setInitial(p.i); setAnnualAdd(p.a); setRate(p.r); setYears(p.y); }}
-                  style={{ background: "#f8fafc", border: "1px solid #e8edf3", borderRadius: 10, padding: "9px 12px", cursor: "pointer", textAlign: "left", transition: "all .15s" }}
-                  onMouseEnter={e => { e.currentTarget.style.borderColor = "#2563eb"; e.currentTarget.style.background = "#eff6ff"; }}
-                  onMouseLeave={e => { e.currentTarget.style.borderColor = "#e8edf3"; e.currentTarget.style.background = "#f8fafc"; }}>
-                  <div style={{ fontSize: 12, fontWeight: 600, color: "#0f172a" }}>{p.label}</div>
-                  <div style={{ fontSize: 10, color: "#94a3b8", fontFamily: "monospace", marginTop: 2 }}>{p.desc}</div>
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* Charts */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-
-          <div style={{ display: "flex", gap: 5, background: "#f1f5f9", borderRadius: 11, padding: 4, width: "fit-content" }}>
-            {tabBtn("growth", "📈 Growth Curves")}
-            {tabBtn("stack",  "📊 Principal vs Gain")}
-          </div>
-
-          {chartMode === "growth" && (
-            <div style={{ background: "#fff", border: "1px solid #e8edf3", borderRadius: 16, padding: 24 }}>
-              <div style={{ fontWeight: 600, color: "#0f172a", marginBottom: 3 }}>Asset Growth — {years} Year Projection</div>
-              <div style={{ fontSize: 11, color: "#94a3b8", fontFamily: "monospace", marginBottom: 18 }}>
-                Blue (with top-ups) vs grey dashed (without) — starting £{initial.toLocaleString()} @ {rate}% p.a.
-              </div>
-              <ResponsiveContainer width="100%" height={270}>
-                <ComposedChart data={data} margin={{ top: 5, right: 8, left: 8, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="cg1" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%"  stopColor="#2563eb" stopOpacity={0.2} />
-                      <stop offset="95%" stopColor="#2563eb" stopOpacity={0} />
-                    </linearGradient>
-                    <linearGradient id="cg2" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%"  stopColor="#94a3b8" stopOpacity={0.12} />
-                      <stop offset="95%" stopColor="#94a3b8" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid stroke="#f1f5f9" strokeDasharray="4 4" vertical={false} />
-                  <XAxis dataKey="year" tick={{ fill: "#cbd5e1", fontSize: 10, fontFamily: "monospace" }} tickLine={false} axisLine={false} />
-                  <YAxis tick={{ fill: "#cbd5e1", fontSize: 10, fontFamily: "monospace" }} tickLine={false} axisLine={false} tickFormatter={gbpShort} width={54} />
-                  <Tooltip content={<CalcTooltip />} />
-                  <ReferenceLine y={initial} stroke="#e2e8f0" strokeDasharray="5 5" />
-                  <Area type="monotone" dataKey="withAdd"    stroke="#2563eb" strokeWidth={2.5} fill="url(#cg1)" dot={false} activeDot={{ r: 5, fill: "#2563eb" }} />
-                  <Area type="monotone" dataKey="withoutAdd" stroke="#94a3b8" strokeWidth={1.8} fill="url(#cg2)" dot={false} strokeDasharray="6 3" activeDot={{ r: 4, fill: "#94a3b8" }} />
-                </ComposedChart>
-              </ResponsiveContainer>
-              <div style={{ marginTop: 14, padding: "10px 14px", background: "#eff6ff", borderRadius: 10, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <span style={{ fontSize: 12, color: "#1d4ed8", fontFamily: "monospace" }}>🎯 Gap at Year {years}</span>
-                <span style={{ fontSize: 16, fontWeight: 800, color: "#2563eb", fontFamily: "monospace" }}>+{gbpShort(extraTopups)} from top-ups</span>
-              </div>
-            </div>
-          )}
-
-          {chartMode === "stack" && (
-            <div style={{ background: "#fff", border: "1px solid #e8edf3", borderRadius: 16, padding: 24 }}>
-              <div style={{ fontWeight: 600, color: "#0f172a", marginBottom: 3 }}>Principal vs Compounded Gain</div>
-              <div style={{ fontSize: 11, color: "#94a3b8", fontFamily: "monospace", marginBottom: 18 }}>
-                Light blue = principal · dark blue = gain (with top-ups)
-              </div>
-              <ResponsiveContainer width="100%" height={270}>
-                <ComposedChart data={data} margin={{ top: 5, right: 8, left: 8, bottom: 0 }}>
-                  <CartesianGrid stroke="#f1f5f9" strokeDasharray="4 4" vertical={false} />
-                  <XAxis dataKey="year" tick={{ fill: "#cbd5e1", fontSize: 10, fontFamily: "monospace" }} tickLine={false} axisLine={false} />
-                  <YAxis tick={{ fill: "#cbd5e1", fontSize: 10, fontFamily: "monospace" }} tickLine={false} axisLine={false} tickFormatter={gbpShort} width={54} />
-                  <Tooltip content={<CalcTooltip />} />
-                  <Bar dataKey="principalWith" stackId="a" fill="#dbeafe" name="Principal" radius={[0,0,4,4]} />
-                  <Bar dataKey="gainWith"      stackId="a" fill="#2563eb" name="Gain"      radius={[4,4,0,0]} />
-                </ComposedChart>
-              </ResponsiveContainer>
-              <div style={{ marginTop: 14 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#94a3b8", marginBottom: 5 }}>
-                  <span>Principal {((totalInvested / last.withAdd) * 100).toFixed(0)}%</span>
-                  <span>Gain {((gainWith / last.withAdd) * 100).toFixed(0)}%</span>
-                </div>
-                <div style={{ height: 8, borderRadius: 4, overflow: "hidden", display: "flex", background: "#f1f5f9" }}>
-                  <div style={{ width: `${(totalInvested / last.withAdd) * 100}%`, background: "#bfdbfe", transition: "width .4s" }} />
-                  <div style={{ flex: 1, background: "#2563eb" }} />
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Milestone table */}
-          <div style={{ background: "#fff", border: "1px solid #e8edf3", borderRadius: 16, padding: "18px 22px" }}>
-            <div style={{ fontWeight: 600, color: "#0f172a", fontSize: 13, marginBottom: 12 }}>Key Milestones</div>
-            <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: "monospace", fontSize: 11 }}>
-                <thead>
-                  <tr>
-                    {["Year","With top-ups","Without","Difference","×Initial"].map(h => (
-                      <th key={h} style={{ textAlign: "right", padding: "5px 10px", color: "#94a3b8", fontWeight: 500, borderBottom: "1px solid #f1f5f9" }}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.filter((_, i) => {
-                    const pts = new Set([0, Math.round(years*.25), Math.round(years*.5), Math.round(years*.75), years]);
-                    return pts.has(i);
-                  }).map(d => (
-                    <tr key={d.yearNum} style={{ borderBottom: "1px solid #f8fafc" }}>
-                      <td style={{ padding: "7px 10px", color: "#64748b", textAlign: "right" }}>{d.yearNum === 0 ? "Start" : `Y${d.yearNum}`}</td>
-                      <td style={{ padding: "7px 10px", color: "#2563eb", fontWeight: 700, textAlign: "right" }}>{gbpShort(d.withAdd)}</td>
-                      <td style={{ padding: "7px 10px", color: "#94a3b8", textAlign: "right" }}>{gbpShort(d.withoutAdd)}</td>
-                      <td style={{ padding: "7px 10px", color: "#16a34a", textAlign: "right" }}>+{gbpShort(d.withAdd - d.withoutAdd)}</td>
-                      <td style={{ padding: "7px 10px", color: "#7c3aed", textAlign: "right" }}>×{(d.withAdd / initial).toFixed(2)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
+      <div style={{textAlign:"right"}}>
+        <div style={{fontSize:10,color:"#475569",fontFamily:"monospace",marginBottom:4}}>BONUS FROM TOP-UPS</div>
+        <div style={{fontSize:20,fontWeight:800,color:"#f59e0b",fontFamily:"monospace"}}>+{gbpS(extra)}</div>
+      </div>
+    </div>
+    <div style={{display:"grid",gridTemplateColumns:"270px 1fr",gap:14}}>
+      <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:16,padding:"20px 18px"}}>
+        <div style={{fontSize:13,fontWeight:700,color:"#0f172a",marginBottom:16,paddingBottom:12,borderBottom:"1px solid #f1f5f9"}}>Adjust Parameters</div>
+        <SRow label="Initial" sub="Your: £5k" value={initial} min={500} max={50000} step={500} onChange={setI} fmt={v=>`£${v.toLocaleString()}`} color="#2563eb"/>
+        <SRow label="Annual top-up" sub="£100/mo=£1.2k" value={annualAdd} min={0} max={12000} step={100} onChange={setA} fmt={v=>v===0?"£0":`£${v.toLocaleString()}/yr`} color="#f59e0b"/>
+        <SRow label="Return %" sub="Balanced ~11%" value={rate} min={1} max={30} step={0.5} onChange={setR} fmt={v=>`${v}%`} color="#16a34a"/>
+        <SRow label="Horizon" value={years} min={1} max={40} step={1} onChange={setY} fmt={v=>`${v}yr${v>1?"s":""}`} color="#7c3aed"/>
+        <div style={{fontSize:10,color:"#94a3b8",fontFamily:"monospace",letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:8}}>Quick Presets</div>
+        <div style={{display:"flex",flexDirection:"column",gap:6}}>
+          {presets.map(p=>(
+            <button key={p.label} onClick={()=>{setI(p.i);setA(p.a);setR(p.r);setY(p.y);}}
+              style={{background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:9,padding:"8px 12px",cursor:"pointer",textAlign:"left"}}
+              onMouseEnter={e=>{e.currentTarget.style.borderColor="#2563eb";e.currentTarget.style.background="#eff6ff";}}
+              onMouseLeave={e=>{e.currentTarget.style.borderColor="#e2e8f0";e.currentTarget.style.background="#f8fafc";}}>
+              <div style={{fontSize:12,fontWeight:600,color:"#0f172a"}}>{p.label}</div>
+              <div style={{fontSize:10,color:"#94a3b8",fontFamily:"monospace",marginTop:1}}>£{p.i.toLocaleString()} · £{(p.a/12).toFixed(0)}/mo · {p.r}% · {p.y}yr</div>
+            </button>
+          ))}
         </div>
       </div>
+      <div style={{display:"flex",flexDirection:"column",gap:12}}>
+        <div style={{display:"flex",gap:4,background:"#f1f5f9",borderRadius:11,padding:4,width:"fit-content"}}>
+          {[{k:"growth",l:"📈 Growth Curves"},{k:"stack",l:"📊 Principal vs Gain"}].map(t=>(
+            <button key={t.k} onClick={()=>setCm(t.k)} style={{padding:"6px 14px",borderRadius:8,border:"none",cursor:"pointer",
+              fontFamily:"monospace",fontSize:11,fontWeight:600,background:cm===t.k?"#0f172a":"transparent",
+              color:cm===t.k?"#fff":"#94a3b8",transition:"all .18s"}}>{t.l}</button>
+          ))}
+        </div>
+        {cm==="growth"&&(
+          <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:16,padding:"18px 20px"}}>
+            <div style={{fontWeight:600,color:"#0f172a",marginBottom:3,fontSize:13}}>{years}-Year Growth Projection</div>
+            <div style={{fontSize:11,color:"#94a3b8",fontFamily:"monospace",marginBottom:14}}>Blue = with top-ups · Grey dashed = without · £{initial.toLocaleString()} @ {rate}%</div>
+            <ResponsiveContainer width="100%" height={230}>
+              <ComposedChart data={data} margin={{top:5,right:8,left:0,bottom:0}}>
+                <defs>
+                  <linearGradient id="g1" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#2563eb" stopOpacity={0.2}/><stop offset="95%" stopColor="#2563eb" stopOpacity={0}/>
+                  </linearGradient>
+                </defs>
+                <CartesianGrid stroke="#f1f5f9" strokeDasharray="4 4" vertical={false}/>
+                <XAxis dataKey="label" tick={{fill:"#cbd5e1",fontSize:10,fontFamily:"monospace"}} tickLine={false} axisLine={false}/>
+                <YAxis tick={{fill:"#cbd5e1",fontSize:10,fontFamily:"monospace"}} tickLine={false} axisLine={false} tickFormatter={gbpS} width={50}/>
+                <Tooltip content={<Tip/>}/>
+                <ReferenceLine y={initial} stroke="#e2e8f0" strokeDasharray="5 5"/>
+                <Area type="monotone" dataKey="withAdd" stroke="#2563eb" strokeWidth={2.5} fill="url(#g1)" dot={false} name="With top-ups"/>
+                <Area type="monotone" dataKey="withoutAdd" stroke="#94a3b8" strokeWidth={1.8} fill="none" dot={false} strokeDasharray="6 3" name="Without top-ups"/>
+              </ComposedChart>
+            </ResponsiveContainer>
+            <div style={{marginTop:12,padding:"10px 14px",background:"#eff6ff",borderRadius:10,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <span style={{fontSize:12,color:"#1d4ed8",fontFamily:"monospace"}}>🎯 Year {years} gap</span>
+              <span style={{fontSize:15,fontWeight:800,color:"#2563eb",fontFamily:"monospace"}}>+{gbpS(extra)} from top-ups</span>
+            </div>
+          </div>
+        )}
+        {cm==="stack"&&(
+          <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:16,padding:"18px 20px"}}>
+            <div style={{fontWeight:600,color:"#0f172a",marginBottom:3,fontSize:13}}>Principal vs Compounded Gain</div>
+            <div style={{fontSize:11,color:"#94a3b8",fontFamily:"monospace",marginBottom:14}}>Light = principal · Dark = gain</div>
+            <ResponsiveContainer width="100%" height={230}>
+              <ComposedChart data={data} margin={{top:5,right:8,left:0,bottom:0}}>
+                <CartesianGrid stroke="#f1f5f9" strokeDasharray="4 4" vertical={false}/>
+                <XAxis dataKey="label" tick={{fill:"#cbd5e1",fontSize:10,fontFamily:"monospace"}} tickLine={false} axisLine={false}/>
+                <YAxis tick={{fill:"#cbd5e1",fontSize:10,fontFamily:"monospace"}} tickLine={false} axisLine={false} tickFormatter={gbpS} width={50}/>
+                <Tooltip content={<Tip/>}/>
+                <Bar dataKey="principal" stackId="a" fill="#dbeafe" name="Principal" radius={[0,0,4,4]}/>
+                <Bar dataKey="gain" stackId="a" fill="#2563eb" name="Gain" radius={[4,4,0,0]}/>
+              </ComposedChart>
+            </ResponsiveContainer>
+            <div style={{marginTop:12}}>
+              <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"#94a3b8",marginBottom:5}}>
+                <span>Principal {((totalIn/last.withAdd)*100).toFixed(0)}%</span>
+                <span>Gain {((gainWith/last.withAdd)*100).toFixed(0)}%</span>
+              </div>
+              <div style={{height:8,borderRadius:4,overflow:"hidden",display:"flex",background:"#f1f5f9"}}>
+                <div style={{width:`${(totalIn/last.withAdd)*100}%`,background:"#bfdbfe",transition:"width .4s"}}/>
+                <div style={{flex:1,background:"#2563eb"}}/>
+              </div>
+            </div>
+          </div>
+        )}
+        <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:16,padding:"16px 20px"}}>
+          <div style={{fontWeight:600,color:"#0f172a",fontSize:13,marginBottom:12}}>Key Milestones</div>
+          <table style={{width:"100%",borderCollapse:"collapse",fontFamily:"monospace",fontSize:11}}>
+            <thead><tr>{["Year","With top-ups","Without","Diff","×Initial"].map(h=>(
+              <th key={h} style={{textAlign:"right",padding:"5px 10px",color:"#94a3b8",fontWeight:500,borderBottom:"1px solid #f1f5f9"}}>{h}</th>
+            ))}</tr></thead>
+            <tbody>{data.filter((_,i)=>{const s=new Set([0,Math.round(years*.25),Math.round(years*.5),Math.round(years*.75),years]);return s.has(i);}).map(d=>(
+              <tr key={d.y} style={{borderBottom:"1px solid #f8fafc"}}>
+                <td style={{padding:"7px 10px",color:"#64748b",textAlign:"right"}}>{d.y===0?"Start":`Y${d.y}`}</td>
+                <td style={{padding:"7px 10px",color:"#2563eb",fontWeight:700,textAlign:"right"}}>{gbpS(d.withAdd)}</td>
+                <td style={{padding:"7px 10px",color:"#94a3b8",textAlign:"right"}}>{gbpS(d.withoutAdd)}</td>
+                <td style={{padding:"7px 10px",color:"#16a34a",textAlign:"right"}}>+{gbpS(d.withAdd-d.withoutAdd)}</td>
+                <td style={{padding:"7px 10px",color:"#7c3aed",textAlign:"right"}}>×{(d.withAdd/initial).toFixed(2)}</td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>);
+}
 
-      {/* Insight footer */}
-      <div style={{ marginTop: 18, padding: "18px 24px", background: "#0f172a", borderRadius: 14, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+function HoldingsView(){
+  return(<div style={{display:"flex",flexDirection:"column",gap:14}}>
+    <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:16,padding:"20px 24px"}}>
+      <div style={{fontSize:10,color:"#94a3b8",fontFamily:"monospace",letterSpacing:"0.1em",marginBottom:18}}>SUGGESTED ALLOCATION · £5,000</div>
+      {ASSETS.map((a,i)=>{
+        const val=(a.alloc/100)*INITIAL_GBP;
+        return(<div key={i} style={{display:"flex",alignItems:"center",gap:12,padding:"13px 0",borderBottom:i<ASSETS.length-1?"1px solid #f1f5f9":"none"}}>
+          <div style={{width:38,height:38,borderRadius:9,background:"#f1f5f9",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>{a.emoji}</div>
+          <div style={{flex:1}}>
+            <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}>
+              <div>
+                <span style={{fontFamily:"monospace",fontWeight:700,fontSize:13,color:"#0f172a"}}>{a.ticker}</span>
+                <span style={{color:"#94a3b8",fontSize:11,marginLeft:8}}>{a.name}</span>
+              </div>
+              <div>
+                <span style={{fontFamily:"monospace",fontSize:13,color:"#0f172a"}}>{gbp(val)}</span>
+                <span style={{marginLeft:8,fontSize:10,padding:"2px 7px",borderRadius:999,
+                  background:a.type==="ETF"?"#eff6ff":a.type==="Stock"?"#fff7ed":"#f1f5f9",
+                  color:a.type==="ETF"?"#2563eb":a.type==="Stock"?"#f97316":"#94a3b8",fontFamily:"monospace"}}>{a.type}</span>
+              </div>
+            </div>
+            <div style={{height:5,background:"#f1f5f9",borderRadius:3,overflow:"hidden"}}>
+              <div style={{height:"100%",width:`${a.alloc}%`,borderRadius:3,
+                background:a.type==="ETF"?"linear-gradient(90deg,#60a5fa,#818cf8)":a.type==="Stock"?"linear-gradient(90deg,#f97316,#fb923c)":"#d1d5db"}}/>
+            </div>
+          </div>
+          <div style={{fontFamily:"monospace",fontSize:14,fontWeight:700,color:"#cbd5e1",minWidth:34,textAlign:"right"}}>{a.alloc}%</div>
+        </div>);
+      })}
+    </div>
+    <div style={{background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:14,padding:"16px 20px"}}>
+      <div style={{fontSize:12,fontWeight:700,color:"#15803d",marginBottom:6}}>🎓 Student Tips</div>
+      <div style={{fontSize:12,color:"#166534",lineHeight:1.7}}>
+        • Trading 212 = <strong>zero commission</strong><br/>
+        • Use <strong>Stocks & Shares ISA</strong> → £20,000/yr tax-free<br/>
+        • Start with <strong>VWRL</strong> for instant diversification<br/>
+        • Add individual stocks once you have conviction
+      </div>
+    </div>
+  </div>);
+}
+
+export default function App(){
+  const [tab,setTab]=useState("tracker");
+  const [live,setLive]=useState(INITIAL_GBP);
+  useEffect(()=>{
+    const id=setInterval(()=>setLive(v=>parseFloat(Math.max(4800,v+(Math.random()-.49)*1.5).toFixed(2))),2000);
+    return()=>clearInterval(id);
+  },[]);
+  const daysIn=Math.max(1,Math.ceil((new Date()-START_DATE)/86400000));
+
+  return(<div style={{display:"flex",minHeight:"100vh",background:"#f8fafc",fontFamily:"'DM Sans',system-ui,sans-serif",color:"#0f172a"}}>
+    <style>{`
+      @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap');
+      *{box-sizing:border-box;margin:0;padding:0;}
+      ::-webkit-scrollbar{width:4px;height:4px;}
+      ::-webkit-scrollbar-thumb{background:#e2e8f0;border-radius:4px;}
+      input[type=range]{-webkit-appearance:none;appearance:none;background:transparent;}
+      input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;}
+      @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+    `}</style>
+
+    <div style={{width:200,flexShrink:0,background:"#fff",borderRight:"1px solid #e8edf3",
+      display:"flex",flexDirection:"column",padding:"20px 12px",position:"sticky",top:0,height:"100vh",overflowY:"auto"}}>
+      <div style={{marginBottom:20,paddingLeft:4}}>
+        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:3}}>
+          <div style={{width:28,height:28,borderRadius:8,background:"linear-gradient(135deg,#2563eb,#7c3aed)",
+            display:"flex",alignItems:"center",justifyContent:"center",fontSize:14}}>📈</div>
+          <span style={{fontSize:15,fontWeight:800,color:"#0f172a",letterSpacing:"-0.02em"}}>Jinwoo</span>
+        </div>
+        <div style={{fontSize:9,color:"#94a3b8",fontFamily:"monospace",letterSpacing:"0.06em",paddingLeft:2}}>PORTFOLIO · T212 ISA</div>
+      </div>
+      <div style={{background:"#0f172a",borderRadius:12,padding:"12px 14px",marginBottom:18}}>
+        <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:4}}>
+          <div style={{width:5,height:5,borderRadius:"50%",background:"#4ade80",animation:"pulse 2s infinite"}}/>
+          <span style={{fontSize:9,color:"#4ade80",fontFamily:"monospace",letterSpacing:"0.1em"}}>LIVE</span>
+        </div>
+        <div style={{fontSize:16,fontWeight:800,color:"#fff",fontFamily:"monospace"}}>{gbp2(live)}</div>
+        <div style={{fontSize:9,color:"#475569",marginTop:3}}>Day {daysIn} · 2 May 2026</div>
+      </div>
+      <div style={{display:"flex",flexDirection:"column",gap:2}}>
+        <div style={{fontSize:9,color:"#cbd5e1",fontFamily:"monospace",letterSpacing:"0.1em",textTransform:"uppercase",padding:"0 8px",marginBottom:4}}>Menu</div>
+        {TABS.map(t=>(
+          <button key={t.id} onClick={()=>setTab(t.id)} style={{display:"flex",alignItems:"center",gap:8,
+            padding:"9px 10px",borderRadius:9,border:"none",background:tab===t.id?"#eff6ff":"transparent",
+            color:tab===t.id?"#2563eb":"#64748b",fontFamily:"'DM Sans',sans-serif",fontSize:13,
+            fontWeight:tab===t.id?700:500,cursor:"pointer",width:"100%",textAlign:"left"}}>
+            <span style={{fontSize:15}}>{t.icon}</span>{t.label}
+            {tab===t.id&&<div style={{marginLeft:"auto",width:5,height:5,borderRadius:"50%",background:"#2563eb"}}/>}
+          </button>
+        ))}
+      </div>
+      <div style={{marginTop:"auto",paddingTop:16,borderTop:"1px solid #f1f5f9"}}>
+        <div style={{fontSize:10,color:"#94a3b8",lineHeight:1.7}}>T212 ISA<br/>0% commission<br/>ISA: £20k/yr</div>
+      </div>
+    </div>
+
+    <div style={{flex:1,padding:"24px 28px",overflowY:"auto",maxHeight:"100vh"}}>
+      <div style={{marginBottom:20,display:"flex",justifyContent:"space-between",alignItems:"flex-end"}}>
         <div>
-          <div style={{ fontSize: 10, color: "#475569", fontFamily: "monospace", letterSpacing: "0.08em", marginBottom: 5 }}>JINWOO'S PROJECTION</div>
-          <div style={{ fontSize: 13, color: "#e2e8f0", lineHeight: 1.6 }}>
-            Adding{" "}
-            <span style={{ color: "#f59e0b", fontWeight: 700 }}>{annualAdd === 0 ? "nothing extra" : `£${Math.round(annualAdd/12).toLocaleString()}/month`}</span>
-            {" "}for{" "}<span style={{ color: "#60a5fa", fontWeight: 700 }}>{years} years</span>
-            {" "}at{" "}<span style={{ color: "#4ade80", fontWeight: 700 }}>{rate}% p.a.</span>
-            {" "}→{" "}<span style={{ color: "#fff", fontWeight: 800 }}>{gbp(last.withAdd)}</span>
+          <div style={{fontSize:20,fontWeight:800,color:"#0f172a",letterSpacing:"-0.02em"}}>
+            {tab==="tracker"?"Portfolio Tracker":tab==="simulate"?"Compound Simulator":"Holdings"}
+          </div>
+          <div style={{fontSize:12,color:"#94a3b8",marginTop:2}}>
+            {tab==="tracker"?"Log your real T212 values & track vs projection":
+             tab==="simulate"?"Adjust variables and see growth in real-time":"Suggested £5,000 allocation"}
           </div>
         </div>
-        <div style={{ flexShrink: 0, background: "#1e293b", borderRadius: 12, padding: "10px 18px", textAlign: "right" }}>
-          <div style={{ fontSize: 10, color: "#475569", fontFamily: "monospace" }}>TOTAL GAIN</div>
-          <div style={{ fontSize: 22, fontWeight: 800, color: "#4ade80", fontFamily: "monospace" }}>+{gbpShort(gainWith)}</div>
+        <div style={{display:"flex",gap:5}}>
+          {TABS.map(t=>(
+            <button key={t.id} onClick={()=>setTab(t.id)} style={{padding:"7px 14px",borderRadius:9,
+              border:"1px solid #e8edf3",background:tab===t.id?"#0f172a":"#fff",
+              color:tab===t.id?"#fff":"#64748b",fontFamily:"'DM Sans',sans-serif",fontSize:12,
+              fontWeight:600,cursor:"pointer",transition:"all .15s"}}>
+              {t.icon} {t.label}
+            </button>
+          ))}
         </div>
       </div>
+      {tab==="tracker"  &&<TrackerView/>}
+      {tab==="simulate" &&<SimulatorView/>}
+      {tab==="holdings" &&<HoldingsView/>}
     </div>
-  );
+  </div>);
 }
+EOF
+echo "Done: $(wc -l < /mnt/user-data/outputs/src/App.jsx) lines"
+Output
 
-// ─────────────────────────────────────────────
-//  ROOT APP
-// ─────────────────────────────────────────────
-export default function JinwooPortfolio() {
-  const [page, setPage]         = useState("dashboard");
-  const [liveValue, setLiveVal] = useState(INITIAL_GBP);
-
-  // Simulated live ticker
-  useEffect(() => {
-    const id = setInterval(() => {
-      setLiveVal(v => parseFloat(Math.max(4_800, v + (Math.random() - 0.49) * 2).toFixed(2)));
-    }, 2_000);
-    return () => clearInterval(id);
-  }, []);
-
-  const today = new Date();
-  const daysIn = Math.max(0, Math.floor((today - START_DATE) / 86_400_000));
-
-  return (
-    <div style={{ display: "flex", minHeight: "100vh", background: "#f8fafc", fontFamily: "'DM Sans', sans-serif" }}>
-      <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
-      <style>{`
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
-        @keyframes fadeUp { from{opacity:0;transform:translateY(12px)} to{opacity:1;transform:translateY(0)} }
-        ::-webkit-scrollbar { width: 4px; height: 4px; }
-        ::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 4px; }
-        input[type=range] { -webkit-appearance: none; appearance: none; background: transparent; width: 100%; }
-        input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; }
-      `}</style>
-
-      {/* ── Sidebar ── */}
-      <div style={{
-        width: 230, flexShrink: 0, background: "#fff",
-        borderRight: "1px solid #e8edf3",
-        display: "flex", flexDirection: "column",
-        padding: "24px 14px",
-        position: "sticky", top: 0, height: "100vh",
-      }}>
-        {/* Logo */}
-        <div style={{ marginBottom: 28, paddingLeft: 6 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 4 }}>
-            <div style={{ width: 30, height: 30, borderRadius: 9, background: "linear-gradient(135deg,#2563eb,#7c3aed)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15 }}>📈</div>
-            <div style={{ fontSize: 16, fontWeight: 800, color: "#0f172a", letterSpacing: "-0.02em" }}>Jinwoo</div>
-          </div>
-          <div style={{ fontSize: 10, color: "#94a3b8", fontFamily: "monospace", letterSpacing: "0.06em", paddingLeft: 2 }}>
-            PORTFOLIO · T212 ISA
-          </div>
-        </div>
-
-        {/* Live badge */}
-        <div style={{ background: "#0f172a", borderRadius: 12, padding: "12px 14px", marginBottom: 22 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 5 }}>
-            <div style={{ width: 5, height: 5, borderRadius: "50%", background: "#4ade80", animation: "pulse 2s infinite" }} />
-            <span style={{ fontSize: 9, color: "#4ade80", fontFamily: "monospace", letterSpacing: "0.1em" }}>LIVE</span>
-          </div>
-          <div style={{ fontSize: 18, fontWeight: 800, color: "#fff", fontFamily: "monospace" }}>
-            {new Intl.NumberFormat("en-GB",{style:"currency",currency:"GBP",minimumFractionDigits:2,maximumFractionDigits:2}).format(liveValue)}
-          </div>
-          <div style={{ fontSize: 9, color: "#475569", marginTop: 4 }}>Day {daysIn === 0 ? 1 : daysIn} · Started 2 May 2026</div>
-        </div>
-
-        {/* Nav */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-          <div style={{ fontSize: 9, color: "#cbd5e1", fontFamily: "monospace", letterSpacing: "0.1em", textTransform: "uppercase", padding: "0 8px", marginBottom: 5 }}>Main</div>
-          <NavItem icon="🏠" label="Dashboard"   active={page === "dashboard"}   onClick={() => setPage("dashboard")} />
-          <NavItem icon="🧮" label="Calculator"  active={page === "calculator"}  onClick={() => setPage("calculator")} />
-        </div>
-
-        {/* Bottom info */}
-        <div style={{ marginTop: "auto", paddingTop: 20, borderTop: "1px solid #f1f5f9" }}>
-          <div style={{ fontSize: 10, color: "#94a3b8", lineHeight: 1.6 }}>
-            Trading 212 ISA<br />
-            0% commission · Tax-free<br />
-            ISA allowance: £20k/yr
-          </div>
-        </div>
-      </div>
-
-      {/* ── Main content ── */}
-      <div style={{ flex: 1, padding: "28px 32px", overflowY: "auto", maxHeight: "100vh" }}>
-        {/* Page header */}
-        <div style={{ marginBottom: 24, display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
-          <div>
-            <div style={{ fontSize: 22, fontWeight: 800, color: "#0f172a", letterSpacing: "-0.02em" }}>
-              {page === "dashboard" ? "Portfolio Dashboard" : "Compound Calculator"}
-            </div>
-            <div style={{ fontSize: 13, color: "#94a3b8", marginTop: 3 }}>
-              {page === "dashboard"
-                ? "Real-time overview of your Trading 212 ISA"
-                : "Simulate growth scenarios interactively"}
-            </div>
-          </div>
-          <div style={{ display: "flex", gap: 6 }}>
-            {[
-              { k: "dashboard",  icon: "🏠", label: "Dashboard"  },
-              { k: "calculator", icon: "🧮", label: "Calculator" },
-            ].map(t => (
-              <button key={t.k} onClick={() => setPage(t.k)} style={{
-                padding: "8px 16px", borderRadius: 10, border: "1px solid #e8edf3",
-                background: page === t.k ? "#0f172a" : "#fff",
-                color: page === t.k ? "#fff" : "#64748b",
-                fontFamily: "'DM Sans', sans-serif", fontSize: 13, fontWeight: 600,
-                cursor: "pointer", display: "flex", alignItems: "center", gap: 6,
-                transition: "all 0.15s",
-              }}>
-                {t.icon} {t.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Content */}
-        <div style={{ animation: "fadeUp 0.3s ease" }} key={page}>
-          {page === "dashboard"  && <DashboardView  liveValue={liveValue} />}
-          {page === "calculator" && <CalculatorView />}
-        </div>
-      </div>
-    </div>
-  );
-}
+Done: 463 lines
